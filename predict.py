@@ -24,7 +24,6 @@ import config
 def load_model_cached():
     import tensorflow as tf
 
-    # Google Drive file ID from your shared link
     DRIVE_FILE_ID = "1Zj_o3hrKR2ZViFNIkmA3a8UhsFNhXGH7"
     model_path   = config.MODEL_SAVE_PATH
     encoder_path = config.ENCODER_SAVE_PATH
@@ -41,7 +40,7 @@ def load_model_cached():
         except Exception as e:
             raise FileNotFoundError(
                 f"Could not download model: {e}\n"
-                f"Make sure Google Drive file is set to 'Anyone with link'."
+                f"Make sure Google Drive file is public."
             )
 
     # Load model
@@ -65,12 +64,21 @@ def load_model_cached():
 # FUNCTION 2 — preprocess_image()
 # ============================================================
 def preprocess_image(uploaded_file):
+    """
+    Preprocesses uploaded image for EfficientNetB0.
+    Uses preprocess_input for correct normalization.
+    """
+    from tensorflow.keras.applications.efficientnet import preprocess_input
+
     img = Image.open(uploaded_file)
     img = img.convert('RGB')
     img = img.resize(config.IMAGE_SIZE)
     img_array = np.array(img, dtype=np.float32)
-    img_array = img_array / 255.0
+
+    # Use EfficientNet preprocessing (NOT /255.0)
+    img_array = preprocess_input(img_array)
     img_array = np.expand_dims(img_array, axis=0)
+
     return img_array
 
 
@@ -78,15 +86,24 @@ def preprocess_image(uploaded_file):
 # FUNCTION 3 — preprocess_metadata()
 # ============================================================
 def preprocess_metadata(age, sex, localization, encoder):
+    """
+    Encodes patient metadata exactly as done during training.
+    """
+    # Encode age
     age_normalized = float(age) / 100.0
+
+    # Encode sex
     sex_mapping = {'Male': 0.0, 'Female': 1.0, 'Unknown': 0.5}
     sex_encoded = sex_mapping.get(sex, 0.5)
+
+    # Encode localization
     try:
         known = list(encoder.classes_)
         loc_value = localization if localization in known else 'unknown'
         loc_encoded = float(encoder.transform([loc_value])[0])
     except Exception:
         loc_encoded = 0.0
+
     metadata_array = np.array(
         [[age_normalized, sex_encoded, loc_encoded]],
         dtype=np.float32
@@ -98,19 +115,26 @@ def preprocess_metadata(age, sex, localization, encoder):
 # FUNCTION 4 — predict()
 # ============================================================
 def predict(model, image_array, metadata_array):
+    """
+    Runs model prediction and returns formatted results.
+    """
     raw_predictions = model.predict(
         [image_array, metadata_array],
         verbose=0
     )
-    probabilities    = raw_predictions[0]
-    predicted_index  = int(np.argmax(probabilities))
-    predicted_class  = config.CLASS_NAMES[predicted_index]
-    predicted_label  = config.CLASS_FULL_NAMES.get(predicted_class, predicted_class)
-    confidence       = float(probabilities[predicted_index]) * 100.0
+    probabilities   = raw_predictions[0]
+    predicted_index = int(np.argmax(probabilities))
+    predicted_class = config.CLASS_NAMES[predicted_index]
+    predicted_label = config.CLASS_FULL_NAMES.get(
+        predicted_class, predicted_class
+    )
+    confidence = float(probabilities[predicted_index]) * 100.0
+
     all_probabilities = {
         config.CLASS_FULL_NAMES.get(cls, cls): float(prob) * 100.0
         for cls, prob in zip(config.CLASS_NAMES, probabilities)
     }
+
     return {
         'predicted_class'  : predicted_class,
         'predicted_label'  : predicted_label,
@@ -178,13 +202,13 @@ def get_disease_description(predicted_class):
         'nv': {
             'name'       : 'Melanocytic Nevi',
             'description': (
-                'Melanocytic nevi are commonly known as moles. They are '
-                'benign growths of melanocytes and are extremely common. '
-                'Most moles are completely harmless and require no treatment.'
+                'Melanocytic nevi are commonly known as moles. '
+                'They are benign growths and are extremely common. '
+                'Most moles are completely harmless.'
             ),
             'symptoms'   : (
-                'Round or oval shape, uniform brown colour, smooth '
-                'borders, consistent size usually under 6mm.'
+                'Round or oval shape, uniform brown colour, '
+                'smooth borders, consistent size usually under 6mm.'
             ),
             'action'     : (
                 'Regular self-examination recommended. '
@@ -194,8 +218,8 @@ def get_disease_description(predicted_class):
         'bcc': {
             'name'       : 'Basal Cell Carcinoma',
             'description': (
-                'Basal cell carcinoma is the most common form of skin cancer. '
-                'It rarely spreads but can cause local tissue damage if untreated.'
+                'Basal cell carcinoma is the most common skin cancer. '
+                'It rarely spreads but can cause local tissue damage.'
             ),
             'symptoms'   : (
                 'Pearly or waxy bump, flat flesh-coloured lesion, '
@@ -213,19 +237,19 @@ def get_disease_description(predicted_class):
                 'years of sun exposure. They are considered precancerous.'
             ),
             'symptoms'   : (
-                'Rough, dry, scaly patch of skin, itching or burning '
-                'in the affected area, colour ranging from pink to red.'
+                'Rough, dry, scaly patch of skin, itching or burning, '
+                'colour ranging from pink to red.'
             ),
             'action'     : (
                 'Schedule a dermatologist visit. '
-                'Treatment is straightforward and highly effective when early.'
+                'Treatment is effective when addressed early.'
             )
         },
         'bkl': {
             'name'       : 'Benign Keratosis',
             'description': (
                 'Benign keratosis is a common non-cancerous skin growth. '
-                'They are completely harmless and do not require treatment.'
+                'They are completely harmless.'
             ),
             'symptoms'   : (
                 'Waxy, scaly, slightly raised growth, colour ranging '
@@ -233,7 +257,7 @@ def get_disease_description(predicted_class):
             ),
             'action'     : (
                 'No treatment required. '
-                'Monitor for any changes and consult a dermatologist if needed.'
+                'Monitor for changes and consult a dermatologist if needed.'
             )
         },
         'df': {
@@ -244,7 +268,7 @@ def get_disease_description(predicted_class):
             ),
             'symptoms'   : (
                 'Small, hard bump that may be red, pink, or brownish, '
-                'often appears on the legs, dimples inward when pinched.'
+                'often appears on the legs.'
             ),
             'action'     : (
                 'No treatment is necessary. '
@@ -254,7 +278,7 @@ def get_disease_description(predicted_class):
         'vasc': {
             'name'       : 'Vascular Lesions',
             'description': (
-                'Vascular lesions are abnormalities of blood vessels in skin. '
+                'Vascular lesions are abnormalities of blood vessels. '
                 'Most are benign and harmless.'
             ),
             'symptoms'   : (
@@ -280,6 +304,6 @@ def get_disease_description(predicted_class):
 # ============================================================
 if __name__ == "__main__":
     print("predict.py loaded successfully")
-    print(f"Model path : {config.MODEL_SAVE_PATH}")
-    print(f"Drive ID   : 1Zj_o3hrKR2ZViFNIkmA3a8UhsFNhXGH7")
-    print("All functions ready!")
+    print(f"Model path  : {config.MODEL_SAVE_PATH}")
+    print(f"Drive ID    : 1Zj_o3hrKR2ZViFNIkmA3a8UhsFNhXGH7")
+    print("All 6 functions ready!")
